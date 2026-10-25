@@ -8,6 +8,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = 'repopilot:local'
+        DOCKERHUB_REPO = 'ayushk39/repopilot'
     }
 
     stages {
@@ -34,8 +35,36 @@ pipeline {
             steps {
                 sh '''
                     set -eu
-                    docker build -t "${IMAGE_NAME}" .
+                    docker build \
+                        -t "${IMAGE_NAME}" \
+                        -t "${DOCKERHUB_REPO}:${GIT_COMMIT}" \
+                        .
                 '''
+            }
+        }
+
+        stage('Publish to Docker Hub') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-repopilot',
+                        usernameVariable: 'DOCKERHUB_USERNAME',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+                        set +x
+                        trap 'docker logout >/dev/null 2>&1 || true' EXIT
+
+                        printf '%s' "$DOCKERHUB_TOKEN" |
+                            docker login \
+                                --username "$DOCKERHUB_USERNAME" \
+                                --password-stdin
+
+                        docker push "${DOCKERHUB_REPO}:${GIT_COMMIT}"
+                    '''
+                }
             }
         }
     }
