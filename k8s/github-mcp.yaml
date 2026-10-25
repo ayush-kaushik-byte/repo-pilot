@@ -1,0 +1,38 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-mcp
+  template:
+    metadata:
+      labels:
+        app: github-mcp
+    spec:
+      containers:
+        - name: github-mcp
+          image: ghcr.io/github/github-mcp-server:v1.12.2
+          args: ["http"]
+          ports:
+            - containerPort: 8082
+          env:
+            - name: GITHUB_READ_ONLY
+              value: "1"
+            - name: GITHUB_TOOLSETS
+              value: "repos"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: github-mcp
+spec:
+  selector:
+    app: github-mcp
+  ports:
+    - port: 8082
+      targetPort: 8082
+  type: ClusterIP

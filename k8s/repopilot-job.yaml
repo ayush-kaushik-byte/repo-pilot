@@ -13,8 +13,8 @@ spec:
       restartPolicy: Never
       containers:
         - name: repopilot
-          image: repopilot:local
-          imagePullPolicy: Never
+          image: ayushk39/repopilot/cfa5f1eb82ee786adbe206b8be47f123ed82a304
+          imagePullPolicy: Always
           args:
             - "--owner"
             - "ayush-kaushik-byte"
@@ -32,5 +32,5 @@ spec:
                   key: GITHUB_PERSONAL_ACCESS_TOKEN
             - name: OLLAMA_HOST
               value: "http://192.168.49.1:11434"
-            - name: DOCKER_HOST
-              value: "tcp://192.168.49.1:2375"
+            - name: GITHUB_MCP_URL
+              value: "http://github-mcp:8082"
