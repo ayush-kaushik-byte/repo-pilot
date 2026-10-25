@@ -74,7 +74,7 @@ async def main():
         # 4. LLM file selection
         # ---------------------------------------------------------
         selector = FileSelector(
-            model_name="qwen3.5:2b",
+            model_name="llama3.2:3b",
             temperature=0.0,
         )
 

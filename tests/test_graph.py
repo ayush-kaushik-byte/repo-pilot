@@ -367,3 +367,116 @@ async def test_answer_generation_failure_returns_controlled_status():
     assert result["status"] == "answer_generation_failed"
     assert "couldn't generate the final answer" in result["answer"].lower()
     assert "TimeoutError" in result["error"]
+
+@pytest.mark.asyncio
+async def test_invalid_owner_stops_before_repository_discovery():
+    state = make_state()
+    state["owner"] = "invalid/owner"
+
+    result = await build_graph(tools=[]).ainvoke(state)
+
+    assert result["status"] == "invalid_input"
+    assert "owner" in result["answer"].lower()
+    assert "snapshot" not in result
+
+
+@pytest.mark.asyncio
+async def test_missing_query_is_rejected():
+    state = make_state()
+    state.pop("query")
+
+    result = await build_graph(tools=[]).ainvoke(state)
+
+    assert result["status"] == "invalid_input"
+    assert "query" in result["answer"].lower()
+    assert "snapshot" not in result
+
+
+@pytest.mark.asyncio
+async def test_valid_request_still_runs_existing_workflow():
+    FakeLLM.assessments = [
+        assessment(True, "The source directly explains the flow.")
+    ]
+
+    result = await build_graph(tools=[]).ainvoke(make_state())
+
+    assert result["status"] == "completed"
+
+@pytest.mark.asyncio
+async def test_empty_model_answer_returns_invalid_output_status():
+    FakeLLM.assessments = [
+        assessment(True, "The repository context answers the question.")
+    ]
+
+    original_ainvoke = FakeLLM.ainvoke
+
+    async def empty_answer(self, messages):
+        if FakeLLM.assessment_index < len(FakeLLM.assessments):
+            result = FakeLLM.assessments[FakeLLM.assessment_index]
+            FakeLLM.assessment_index += 1
+            return result
+
+        return SimpleNamespace(content="   ")
+
+    FakeLLM.ainvoke = empty_answer
+
+    try:
+        result = await build_graph(tools=[]).ainvoke(make_state())
+    finally:
+        FakeLLM.ainvoke = original_ainvoke
+
+    assert result["status"] == "invalid_model_output"
+    assert "invalid response" in result["answer"].lower()
+
+
+@pytest.mark.asyncio
+async def test_non_string_model_answer_returns_invalid_output_status():
+    FakeLLM.assessments = [
+        assessment(True, "The repository context answers the question.")
+    ]
+
+    original_ainvoke = FakeLLM.ainvoke
+
+    async def non_string_answer(self, messages):
+        if FakeLLM.assessment_index < len(FakeLLM.assessments):
+            result = FakeLLM.assessments[FakeLLM.assessment_index]
+            FakeLLM.assessment_index += 1
+            return result
+
+        return SimpleNamespace(content=None)
+
+    FakeLLM.ainvoke = non_string_answer
+
+    try:
+        result = await build_graph(tools=[]).ainvoke(make_state())
+    finally:
+        FakeLLM.ainvoke = original_ainvoke
+
+    assert result["status"] == "invalid_model_output"
+    assert "must be a string" in result["error"]
+
+@pytest.mark.asyncio
+async def test_missing_model_response_content_returns_invalid_output_status():
+    FakeLLM.assessments = [
+        assessment(True, "The repository context answers the question.")
+    ]
+
+    original_ainvoke = FakeLLM.ainvoke
+
+    async def missing_content(self, messages):
+        if FakeLLM.assessment_index < len(FakeLLM.assessments):
+            result = FakeLLM.assessments[FakeLLM.assessment_index]
+            FakeLLM.assessment_index += 1
+            return result
+
+        return SimpleNamespace()
+
+    FakeLLM.ainvoke = missing_content
+
+    try:
+        result = await build_graph(tools=[]).ainvoke(make_state())
+    finally:
+        FakeLLM.ainvoke = original_ainvoke
+
+    assert result["status"] == "invalid_model_output"
+    assert "readable text content" in result["error"]

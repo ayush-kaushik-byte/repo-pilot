@@ -64,3 +64,47 @@ def test_formats_assessment_failure():
 
     assert any("assessment" in m.lower() and "error" in m.lower()
                for m in messages)
+
+
+def test_formats_evidence_reason():
+    messages = format_progress_event({
+        "check_evidence": {
+            "evidence_sufficient": False,
+            "evidence_assessment_failed": False,
+            "evidence_reason": "The request flow is not fully represented.",
+        }
+    })
+
+    assert any(
+        "The request flow is not fully represented." in message
+        for message in messages
+    )
+
+
+def test_formats_recovery_attempt_count():
+    messages = format_progress_event({
+        "recover_files": {"recovery_attempts": 1}
+    })
+
+    assert any("Recovery attempt count: 1" in message for message in messages)
+
+
+def test_formats_terminal_workflow_status():
+    messages = format_progress_event({
+        "finish_insufficient_evidence": {
+            "status": "insufficient_evidence"
+        }
+    })
+
+    assert any(
+        "Workflow stopped: insufficient_evidence" in message
+        for message in messages
+    )
+
+
+def test_does_not_report_missing_terminal_status():
+    messages = format_progress_event({
+        "finish_no_candidates": {}
+    })
+
+    assert not any("Workflow stopped:" in message for message in messages)

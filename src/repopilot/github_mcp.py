@@ -25,6 +25,7 @@ def create_github_mcp_client() -> MultiServerMCPClient:
         {
             "github": {
                 "transport": "stdio",
+                "env": os.environ.copy(),
                 "command": "docker",
                 "args": [
                     "run",

@@ -29,7 +29,7 @@ class FileSelector:
     TIER2_MIN_SCORE = 0.85
     TIER2_MIN_MARGIN = 0.10
 
-    model_name: str = "qwen3.5:2b"
+    model_name: str = "llama3.2:3b"
     temperature: float = 0.0
 
     def __post_init__(self):

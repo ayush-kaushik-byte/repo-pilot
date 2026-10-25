@@ -6,6 +6,7 @@ from typing import Any
 
 from repopilot.github_mcp import github_mcp_session
 from repopilot.graph import build_graph
+from repopilot.guardrails.input_validation import validate_request
 
 
 PROGRESS_MESSAGES = {
@@ -37,6 +38,7 @@ PROGRESS_MESSAGES = {
 }
 
 
+
 def format_progress_event(
     update: dict[str, Any],
     include_progress: bool = True,
@@ -55,14 +57,10 @@ def format_progress_event(
 
             if files:
                 successful = sum(
-                    1
-                    for file in files
-                    if file.status == "success"
+                    1 for file in files if file.status == "success"
                 )
                 failed = sum(
-                    1
-                    for file in files
-                    if file.status == "failed"
+                    1 for file in files if file.status == "failed"
                 )
 
                 messages.append(
@@ -82,17 +80,45 @@ def format_progress_event(
         elif node_name == "check_evidence":
             if state_update.get("evidence_assessment_failed"):
                 messages.append(
-                    "Evidence assessment encountered an error."
+                    "Evidence assessment encountered an error; "
+                    "checking whether bounded recovery is possible."
                 )
             elif state_update.get("evidence_sufficient") is True:
-                messages.append("Evidence is sufficient.")
-            elif state_update.get("evidence_sufficient") is False:
                 messages.append(
-                    "Evidence is insufficient; "
-                    "checking recovery options."
+                    "Evidence assessment passed: sufficient evidence."
+                )
+            elif state_update.get("evidence_sufficient") is False:
+                reason = state_update.get("evidence_reason")
+
+                messages.append(
+                    "Evidence assessment: insufficient evidence."
+                )
+
+                if reason:
+                    messages.append(f"Evidence assessment detail: {reason}")
+
+                messages.append(
+                    "Checking whether bounded recovery is possible."
+                )
+
+        elif node_name == "recover_files":
+            attempts = state_update.get("recovery_attempts")
+
+            if attempts is not None:
+                messages.append(
+                    f"Recovery attempt count: {attempts}."
+                )
+
+        elif node_name.startswith("finish_"):
+            status = state_update.get("status")
+
+            if status:
+                messages.append(
+                    f"Workflow stopped: {status}."
                 )
 
     return messages
+
 
 
 async def run(
@@ -101,6 +127,21 @@ async def run(
     query: str,
     model_name: str,
 ) -> None:
+
+    errors = validate_request(
+        owner=owner,
+        repository=repository,
+        query=query,
+        model_name=model_name,
+    )
+
+    if errors:
+        print("\n=== RepoPilot Result ===")
+        print("Status: invalid_input")
+        for error in errors:
+            print(f"Input error: {error}")
+        return
+
     async with github_mcp_session() as tools:
         graph = build_graph(
             tools,
@@ -243,7 +284,7 @@ def main() -> None:
     parser.add_argument("--owner", required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--query", required=True)
-    parser.add_argument("--model", default="qwen3.5:2b")
+    parser.add_argument("--model", default="llama3.2:3b")
 
     args = parser.parse_args()
 

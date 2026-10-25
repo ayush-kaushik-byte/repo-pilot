@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: repopilot-query
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1200
+  template:
+    metadata:
+      labels:
+        app: repopilot
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: repopilot
+          image: repopilot:local
+          imagePullPolicy: Never
+          args:
+            - "--owner"
+            - "ayush-kaushik-byte"
+            - "--repo"
+            - "Django_Repository"
+            - "--query"
+            - "Where is application logic implemented, and how does the request flow work?"
+            - "--model"
+            - "llama3.2:3b"
+          env:
+            - name: GITHUB_PERSONAL_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: repopilot-secrets
+                  key: GITHUB_PERSONAL_ACCESS_TOKEN
+            - name: OLLAMA_HOST
+              value: "http://192.168.49.1:11434"
+            - name: DOCKER_HOST
+              value: "tcp://192.168.49.1:2375"

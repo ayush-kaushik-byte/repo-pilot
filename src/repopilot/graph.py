@@ -15,7 +15,8 @@ from repopilot.repository_context import (
     RepositoryContextBuilder,
 )
 from repopilot.repository_discovery import RepositoryDiscoverer
-
+from repopilot.guardrails.input_validation import validate_request
+from repopilot.guardrails.output_validation import validate_output
 
 MAX_RECOVERY_ATTEMPTS = 1
 
@@ -61,11 +62,12 @@ class RepoPilotState(TypedDict, total=False):
     error: str
     evidence_assessment_failed: bool
     evidence_assessment_error: str
+    input_errors: list[str]
 
 
 def build_graph(
     tools: list,
-    model_name: str = "qwen3.5:2b",
+    model_name: str = "llama3.2:3b",
 ):
     """Build and compile the RepoPilot LangGraph workflow."""
 
@@ -194,7 +196,7 @@ def build_graph(
 
         try:
             llm = ChatOllama(
-                model=state.get("model_name", "qwen3.5:2b"),
+                model=state.get("model_name", "llama3.2:3b"),
                 temperature=0.0,
             )
             assessor = llm.with_structured_output(EvidenceAssessment)
@@ -202,12 +204,39 @@ def build_graph(
             assessment = await assessor.ainvoke([
                 SystemMessage(
                     content=(
-                        "Assess whether the supplied repository source "
-                        "directly answers the user's specific question. "
-                        "Evaluate code, not filenames alone. For flows, "
-                        "check that the relevant steps are represented. "
-                        "Do not demand unrelated details. If important "
-                        "evidence is missing, explain what."
+                        "You are RepoPilot's repository evidence assessor. "
+                        "Decide whether the supplied source code contains enough "
+                        "direct evidence to answer the user's actual question.\n\n"
+
+                        "Use these rules:\n"
+                        "1. Focus on the user's central question, not every related "
+                        "detail that could be investigated.\n"
+                        "2. Mark evidence as sufficient if the code supports a useful, "
+                        "factually grounded answer to the central question.\n"
+                        "3. For broad questions, a high-level explanation of the "
+                        "supported flow is sufficient. Do not require every layer, "
+                        "such as middleware, templates, models, authentication, "
+                        "or error handling, unless the question specifically asks "
+                        "about those layers.\n"
+                        "4. If the question has multiple parts, assess whether the "
+                        "main parts can be answered from the evidence. Missing "
+                        "nonessential details must not make the entire assessment "
+                        "insufficient.\n"
+                        "5. Mark evidence as insufficient only when a material "
+                        "part of the central question cannot be answered reliably "
+                        "from the supplied code, or when the supplied content is "
+                        "irrelevant or too incomplete.\n"
+                        "6. Evaluate actual code and relationships between files, "
+                        "not filenames alone.\n"
+                        "7. Never invent implementation details. A qualified or "
+                        "partial answer is acceptable when the available evidence "
+                        "supports it.\n\n"
+
+                        "Return sufficient=True when the central question can be "
+                        "answered with the available evidence, even if some "
+                        "secondary details remain unknown. In missing_information, "
+                        "briefly explain why the evidence is sufficient or identify "
+                        "the specific material information that is missing."
                     )
                 ),
                 HumanMessage(
@@ -309,18 +338,17 @@ def build_graph(
 
         # Safety check: never generate a normal answer when the
         # evidence assessment says it is insufficient.
-        if not state.get("evidence_sufficient", False):
+        if not context.text.strip():
             return {
                 "answer": (
-                    "I couldn't find enough repository evidence to "
-                    "answer this question reliably. "
-                    f"Reason: {state.get('evidence_reason', 'Evidence insufficient.')}"
+                    "I couldn't find usable repository content to answer "
+                    "this question reliably."
                 ),
                 "status": "insufficient_evidence",
             }
 
         llm = ChatOllama(
-            model=state.get("model_name", "qwen3.5:2b"),
+            model=state.get("model_name", "llama3.2:3b"),
             temperature=0.0,
         )
 
@@ -361,7 +389,7 @@ def build_graph(
         usage = getattr(response, "usage_metadata", None) or {}
 
         print("\n[LLM Diagnostics: answer_query]")
-        print(f"Model: {state.get('model_name', 'qwen3.5:2b')}")
+        print(f"Model: {state.get('model_name', 'llama3.2:3b')}")
         print(f"Prompt tokens: {metadata.get('prompt_eval_count')}")
         print(f"Output tokens: {metadata.get('eval_count')}")
         print(
@@ -374,8 +402,67 @@ def build_graph(
         )
         print(f"Usage metadata: {usage}")
 
+        try:
+            answer = response.content
+            print("\n====================Printing response=====================\n")
+            print(response)
+            print("\n")
+        except Exception:
+            return {
+                "answer": (
+                    "RepoPilot received an invalid response from the "
+                    "language model and cannot return it as a completed answer."
+                ),
+                "status": "invalid_model_output",
+                "error": (
+                    "The model response did not contain readable text content."
+                ),
+            }
+        
+        print("\n[LLM Response Content Diagnostics]")
+        print(f"Response type: {type(response).__name__}")
+        print(f"Content type: {type(answer).__name__}")
+
+        if isinstance(answer, str):
+            print(f"Content length: {len(answer)}")
+            print(f"Content preview: {answer[:200]!r}")
+        else:
+            print(f"Content representation: {repr(answer)[:300]}")
+
+        additional_kwargs = (
+            getattr(response, "additional_kwargs", None) or {}
+        )
+        print(
+            "Additional response fields: "
+            f"{list(additional_kwargs.keys())}"
+        )
+
+        for key, value in additional_kwargs.items():
+            if isinstance(value, str):
+                print(f"{key}: type=str, length={len(value)}")
+            elif isinstance(value, list):
+                print(f"{key}: type=list, length={len(value)}")
+            else:
+                print(f"{key}: type={type(value).__name__}")
+        
+        print(f"Finish reason: {metadata.get('done_reason')}")
+        print(f"Content is empty: {not isinstance(answer, str) or not answer.strip()}")
+
+        output_errors = validate_output(answer)
+
+        if output_errors:
+            return {
+                "answer": (
+                    "RepoPilot generated an invalid response and "
+                    "cannot return it as a completed answer. "
+                    + " ".join(output_errors)
+                ),
+                "status": "invalid_model_output",
+                "error": "; ".join(output_errors),
+            }
+
         return {
-            "answer": response.content,
+            "answer": answer,
             "status": "completed",
         }
 
@@ -458,6 +545,28 @@ def build_graph(
             "status": "no_valid_selection",
         }
 
+    def validate_input(state: RepoPilotState) -> dict:
+        errors = validate_request(
+            owner=state.get("owner"),
+            repository=state.get("repository"),
+            query=state.get("query"),
+            model_name=state.get("model_name", model_name),
+        )
+        return {"input_errors": errors}
+
+    def route_input(state: RepoPilotState) -> str:
+        return "invalid" if state.get("input_errors") else "valid"
+
+    def finish_invalid_input(state: RepoPilotState) -> dict:
+        errors = state.get("input_errors", [])
+        return {
+            "answer": (
+                "The request was rejected because its input is invalid. "
+                + " ".join(errors)
+            ),
+            "status": "invalid_input",
+        }
+    
     def route_candidates(state: RepoPilotState) -> str:
         return "select" if state.get("candidates") else "no_candidates"
 
@@ -494,8 +603,21 @@ def build_graph(
         "finish_assessment_failed",
         finish_assessment_failed,
     )
+    builder.add_node("validate_input", validate_input)
+    builder.add_node("finish_invalid_input", finish_invalid_input)
 
-    builder.add_edge(START, "discover_repository")
+    builder.add_edge(START, "validate_input")
+
+    builder.add_conditional_edges(
+        "validate_input",
+        route_input,
+        {
+            "valid": "discover_repository",
+            "invalid": "finish_invalid_input",
+        },
+    )
+
+    builder.add_edge("finish_invalid_input", END)
     builder.add_edge("discover_repository", "analyze_repository")
     builder.add_edge("analyze_repository", "generate_candidates")
 
