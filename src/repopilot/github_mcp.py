@@ -11,6 +11,7 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 load_dotenv()
 
 
+
 def create_github_mcp_client() -> MultiServerMCPClient:
     """Create the GitHub MCP client configuration."""
 
@@ -21,6 +22,24 @@ def create_github_mcp_client() -> MultiServerMCPClient:
             "GITHUB_PERSONAL_ACCESS_TOKEN is not set in .env"
         )
 
+    mcp_url = os.getenv("GITHUB_MCP_URL")
+
+    if mcp_url:
+        return MultiServerMCPClient(
+            {
+                "github": {
+                    "transport": "http",
+                    "url": mcp_url,
+                    "headers": {
+                        "Authorization": f"Bearer {github_token}",
+                        "X-MCP-Toolsets": "repos",
+                        "X-MCP-Readonly": "true",
+                    },
+                }
+            }
+        )
+
+    # Local development: launch GitHub MCP through Docker over stdio.
     return MultiServerMCPClient(
         {
             "github": {
@@ -37,11 +56,12 @@ def create_github_mcp_client() -> MultiServerMCPClient:
                     "GITHUB_READ_ONLY=1",
                     "-e",
                     "GITHUB_TOOLSETS=repos",
-                    "ghcr.io/github/github-mcp-server",
+                    "ghcr.io/github/github-mcp-server:v1.12.2",
                 ],
             }
         }
     )
+
 
 
 @asynccontextmanager
