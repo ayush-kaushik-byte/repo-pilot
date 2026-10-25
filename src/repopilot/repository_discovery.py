@@ -123,7 +123,10 @@ class RepositoryDiscoverer:
         )
 
         if not isinstance(result, list):
-            return
+            raise RuntimeError(
+                f"Expected a directory listing for path {path!r}, "
+                f"received {type(result).__name__}: {str(result)[:300]}"
+            )
 
         for item in result:
 

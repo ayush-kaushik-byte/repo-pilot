@@ -83,38 +83,48 @@ async def github_mcp_session() -> AsyncIterator[list]:
         yield tools
 
 
+
 def normalize_mcp_result(result: Any) -> Any:
+    """Normalize MCP tool responses across transport implementations."""
+
+    if isinstance(result, str):
+        try:
+            return json.loads(result)
+        except json.JSONDecodeError:
+            return result
+
     if not isinstance(result, list):
         return result
 
-    text_items = [
-        item.get("text", "")
-        for item in result
-        if isinstance(item, dict) and item.get("type") == "text"
-    ]
+    text_items = []
+    for item in result:
+        if isinstance(item, dict) and item.get("type") == "text":
+            text_items.append(item.get("text", ""))
+        elif getattr(item, "type", None) == "text":
+            text_items.append(getattr(item, "text", ""))
 
     if not text_items:
         return result
 
-    # Directory/list responses are returned as JSON text.
     for text in text_items:
         try:
             return json.loads(text)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             continue
 
-    # File responses may contain a status message followed
-    # by the actual file contents.
     meaningful_text = [
-        text
-        for text in text_items
-        if not text.startswith("successfully downloaded text file")
+        text for text in text_items
+        if isinstance(text, str)
+        and not text.startswith("successfully downloaded text file")
     ]
 
     if meaningful_text:
         return "\n".join(meaningful_text)
 
-    return "\n".join(text_items)
+    return "\n".join(
+        text for text in text_items if isinstance(text, str)
+    )
+
 
 
 async def inspect_path(
